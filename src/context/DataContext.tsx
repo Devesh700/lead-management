@@ -36,6 +36,7 @@ interface DataContextType {
   addQuotation: (
     quotation: Omit<Quotation, 'id' | 'quote_number' | 'created_at'>
   ) => Quotation;
+  updateQuotation: (id: string, updates: Partial<Quotation>) => void;
   updateQuotationStatus: (id: string, status: QuotationStatus) => void;
   addCategory: (cat: Omit<Category, 'id'>) => void;
   getFilteredLeads: () => Lead[];
@@ -271,6 +272,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newQuote;
   };
 
+  const updateQuotation = (id: string, updates: Partial<Quotation>) => {
+    setQuotations((prev) =>
+      prev.map((q) => (q.id === id ? { ...q, ...updates } : q))
+    );
+  };
+
   const updateQuotationStatus = (id: string, status: QuotationStatus) => {
     setQuotations((prev) =>
       prev.map((q) => (q.id === id ? { ...q, status } : q))
@@ -301,6 +308,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateLeadStatus,
         addLeadActivity,
         addQuotation,
+        updateQuotation,
         updateQuotationStatus,
         addCategory,
         getFilteredLeads,
