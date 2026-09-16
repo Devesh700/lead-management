@@ -5,26 +5,46 @@ import {
   Plus,
   Flame,
   X,
+  Download,
+  CheckSquare,
+  Sparkles,
+  Grid,
+  List,
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import type { LeadStatus, LeadSource, CategoryCode } from '../../types';
+import type { LeadStatus, LeadSource, CategoryCode, Lead } from '../../types';
 
 interface LeadsListProps {
   onNavigate: (page: string, leadId?: string) => void;
 }
 
 export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
-  const { getFilteredLeads, addLead, staff, categories, currentStaff, activeCategory } = useData();
+  const {
+    getFilteredLeads,
+    addLead,
+    updateLeadStatus,
+    staff,
+    categories,
+    currentStaff,
+    activeCategory,
+  } = useData();
 
   const leads = getFilteredLeads();
+
+  // Excel preset tabs
+  const [activeTab, setActiveTab] = useState<'all' | 'pipeline' | 'hot' | 'won' | 'lost'>('all');
+  const [viewDensity, setViewDensity] = useState<'comfortable' | 'compact'>('comfortable');
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<LeadStatus[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<LeadSource[]>([]);
-  const [hotOnly, setHotOnly] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [showHelperBanner, setShowHelperBanner] = useState(true);
+
+  // Bulk selection state
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
 
   // New Lead Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -58,8 +78,80 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
     );
   };
 
+  // Bulk select handlers
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedLeadIds(filteredLeads.map((l) => l.id));
+    } else {
+      setSelectedLeadIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedLeadIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Bulk batch status change
+  const handleBatchStatusChange = (status: LeadStatus) => {
+    selectedLeadIds.forEach((id) => {
+      updateLeadStatus(id, status, `Batch status update to ${status}`);
+    });
+    setSelectedLeadIds([]);
+  };
+
+  // CSV Export function
+  const handleExportCSV = (dataToExport: Lead[]) => {
+    const headers = [
+      'Lead Number',
+      'Customer Name',
+      'Primary Mobile',
+      'Category Code',
+      'Assigned Staff',
+      'Status',
+      'Source',
+      'Won Value (INR)',
+      'Created Date',
+    ];
+    const rows = dataToExport.map((l) => [
+      l.lead_number,
+      `"${l.customer_name}"`,
+      l.mobile_primary,
+      l.category_code,
+      `"${l.assigned_staff}"`,
+      l.status,
+      l.source,
+      l.won_value || '',
+      l.created_at,
+    ]);
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute(
+      'download',
+      `leads_export_${activeCategory}_${new Date().toISOString().split('T')[0]}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Filter application
   const filteredLeads = leads.filter((l) => {
+    // Tab filter
+    if (activeTab === 'pipeline' && (l.status === 'WON' || l.status === 'LOST')) return false;
+    if (activeTab === 'hot' && !l.hot_lead) return false;
+    if (activeTab === 'won' && l.status !== 'WON') return false;
+    if (activeTab === 'lost' && l.status !== 'LOST') return false;
+
+    // Search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       const matchName = l.customer_name.toLowerCase().includes(term);
@@ -67,16 +159,12 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
       const matchNum = l.lead_number.toLowerCase().includes(term);
       if (!matchName && !matchMobile && !matchNum) return false;
     }
-    if (hotOnly && !l.hot_lead) return false;
-    if (selectedStatuses.length > 0 && !selectedStatuses.includes(l.status)) {
-      return false;
-    }
-    if (selectedStaff.length > 0 && !selectedStaff.includes(l.assigned_staff)) {
-      return false;
-    }
-    if (selectedSources.length > 0 && !selectedSources.includes(l.source)) {
-      return false;
-    }
+
+    // Custom Filters
+    if (selectedStatuses.length > 0 && !selectedStatuses.includes(l.status)) return false;
+    if (selectedStaff.length > 0 && !selectedStaff.includes(l.assigned_staff)) return false;
+    if (selectedSources.length > 0 && !selectedSources.includes(l.source)) return false;
+
     return true;
   });
 
@@ -108,24 +196,91 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-4">
-      {/* Result Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-xs text-[#64748b]">
-          Showing <strong className="text-[#0f172a]">{filteredLeads.length} leads</strong> in{' '}
-          <strong className="text-[#0f172a]">
-            {activeCategory === 'ALL' ? 'All Categories' : activeCategory}
-          </strong>
-        </div>
-        <div className="flex items-center gap-2">
+      {/* Excel Migration Onboarding Banner */}
+      {showHelperBanner && (
+        <div className="bg-[#eff6ff] border border-[#bfdbfe] rounded-2xl p-4 flex items-center justify-between text-xs text-[#1e40af] shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-[#2563eb] text-white flex items-center justify-center font-bold flex-shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold">Excel User Quick Guide:</span> You can edit statuses directly in table cells, multi-select rows for batch updates, switch to Compact Grid view, or export to CSV anytime!
+            </div>
+          </div>
           <button
-            onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+            onClick={() => setShowHelperBanner(false)}
+            className="text-[#3b82f6] hover:text-[#1d4ed8] p-1 rounded"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Preset Excel Sheet Tabs & Utility Buttons */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e2e8f0] pb-2">
+        {/* Preset Tabs */}
+        <div className="flex gap-1 bg-[#f1f5f9] p-1 rounded-xl text-xs font-semibold">
+          {[
+            { id: 'all', label: 'All Leads', count: leads.length },
+            {
+              id: 'pipeline',
+              label: 'Open Pipeline',
+              count: leads.filter((l) => l.status !== 'WON' && l.status !== 'LOST').length,
+            },
+            { id: 'hot', label: 'Hot Leads', count: leads.filter((l) => l.hot_lead).length },
+            { id: 'won', label: 'Won Deals', count: leads.filter((l) => l.status === 'WON').length },
+            { id: 'lost', label: 'Lost', count: leads.filter((l) => l.status === 'LOST').length },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                activeTab === tab.id
+                  ? 'bg-white text-[#0f172a] shadow-xs font-bold'
+                  : 'text-[#64748b] hover:text-[#0f172a]'
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={`text-[0.62rem] px-1.5 py-0.2 rounded-full font-extrabold ${
+                  activeTab === tab.id ? 'bg-[#2563eb] text-white' : 'bg-[#e2e8f0] text-[#475569]'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* View Density & Export Action */}
+        <div className="flex items-center gap-2">
+          {/* Grid View Density Toggle */}
+          <div className="flex bg-[#f1f5f9] p-1 rounded-lg text-xs border border-[#e2e8f0]">
+            <button
+              onClick={() => setViewDensity('comfortable')}
+              title="Comfortable View"
+              className={`p-1 rounded ${
+                viewDensity === 'comfortable' ? 'bg-white shadow-xs text-[#2563eb]' : 'text-[#64748b]'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewDensity('compact')}
+              title="Compact Excel Grid View"
+              className={`p-1 rounded ${
+                viewDensity === 'compact' ? 'bg-white shadow-xs text-[#2563eb]' : 'text-[#64748b]'
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <button
+            onClick={() => handleExportCSV(filteredLeads)}
             className="px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white text-xs font-semibold text-[#334155] hover:bg-[#f8fafc] flex items-center gap-1.5 transition"
           >
-            <Filter className="w-3.5 h-3.5 text-[#2563eb]" />
-            Filters
-            <span className="bg-[#eff6ff] text-[#2563eb] text-[0.68rem] px-1.5 py-0.2 rounded-full font-bold">
-              {selectedStatuses.length + selectedStaff.length + selectedSources.length}
-            </span>
+            <Download className="w-3.5 h-3.5 text-[#16a34a]" /> Export CSV
           </button>
           <button
             onClick={() => setShowAddModal(true)}
@@ -136,12 +291,84 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Expandable Filter Drawer Panel */}
+      {/* Batch Floating Toolbar when Rows are Selected */}
+      {selectedLeadIds.length > 0 && (
+        <div className="bg-[#0f172a] text-white rounded-xl p-3 px-4 flex items-center justify-between text-xs shadow-lg animate-fade-in">
+          <div className="flex items-center gap-2 font-bold">
+            <CheckSquare className="w-4 h-4 text-[#3b82f6]" />
+            <span>{selectedLeadIds.length} Leads Selected</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[#94a3b8]">Batch Update Status:</span>
+            <select
+              onChange={(e) => {
+                if (e.target.value) handleBatchStatusChange(e.target.value as LeadStatus);
+              }}
+              defaultValue=""
+              className="bg-[#1e293b] text-white px-2.5 py-1 rounded-lg border border-[#334155] outline-none font-semibold cursor-pointer"
+            >
+              <option value="" disabled>
+                Select Status...
+              </option>
+              {['NEW', 'CONTACTED', 'QUALIFIED', 'MEASUREMENT_DONE', 'QUOTED', 'NEGOTIATION', 'ON_HOLD', 'WON', 'LOST'].map(
+                (st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                )
+              )}
+            </select>
+            <button
+              onClick={() => handleExportCSV(leads.filter((l) => selectedLeadIds.includes(l.id)))}
+              className="px-2.5 py-1 bg-[#16a34a] text-white font-bold rounded-lg hover:bg-[#15803d]"
+            >
+              Export Selected
+            </button>
+            <button
+              onClick={() => setSelectedLeadIds([])}
+              className="text-[#94a3b8] hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Search Bar & Custom Filters Toggle */}
+      <div className="flex flex-wrap gap-3 items-center justify-between">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
+          <input
+            type="text"
+            placeholder="Search by name, mobile, or lead ID..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 bg-white border border-[#e2e8f0] rounded-xl text-xs font-medium outline-none focus:border-[#2563eb] transition"
+          />
+        </div>
+
+        <button
+          onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+          className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition ${
+            filterPanelOpen
+              ? 'bg-[#2563eb] text-white border-[#2563eb]'
+              : 'bg-white border-[#e2e8f0] text-[#334155] hover:bg-[#f8fafc]'
+          }`}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          Advanced Filters
+          <span className="bg-[#eff6ff] text-[#2563eb] text-[0.68rem] px-1.5 py-0.2 rounded-full font-bold">
+            {selectedStatuses.length + selectedStaff.length + selectedSources.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Advanced Filter Drawer */}
       {filterPanelOpen && (
         <div className="bg-white border border-[#e8edf3] rounded-2xl p-4 space-y-4 shadow-xs">
           <div className="flex items-center justify-between border-b border-[#f1f5f9] pb-3">
             <span className="text-xs font-bold text-[#0f172a] flex items-center gap-2">
-              <Filter className="w-3.5 h-3.5 text-[#2563eb]" /> Filter Leads
+              <Filter className="w-3.5 h-3.5 text-[#2563eb]" /> Column Filters
             </span>
             <button
               onClick={() => {
@@ -151,45 +378,35 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
               }}
               className="text-[0.72rem] font-bold text-[#dc2626] hover:underline"
             >
-              Clear All
+              Clear All Filters
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            {/* Filter Group: Status */}
             <div>
               <div className="text-[0.66rem] uppercase tracking-wider font-bold text-[#64748b] mb-2">
-                Status
+                Pipeline Status
               </div>
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {[
-                  'NEW',
-                  'CONTACTED',
-                  'QUALIFIED',
-                  'MEASUREMENT_DONE',
-                  'QUOTED',
-                  'NEGOTIATION',
-                  'ON_HOLD',
-                  'WON',
-                  'LOST',
-                ].map((st) => (
-                  <label key={st} className="flex items-center gap-2 cursor-pointer font-medium text-[#334155]">
-                    <input
-                      type="checkbox"
-                      checked={selectedStatuses.includes(st as LeadStatus)}
-                      onChange={() => toggleStatus(st as LeadStatus)}
-                      className="accent-[#2563eb] w-3.5 h-3.5"
-                    />
-                    <span>{st}</span>
-                  </label>
-                ))}
+                {['NEW', 'CONTACTED', 'QUALIFIED', 'MEASUREMENT_DONE', 'QUOTED', 'NEGOTIATION', 'ON_HOLD', 'WON', 'LOST'].map(
+                  (st) => (
+                    <label key={st} className="flex items-center gap-2 cursor-pointer font-medium text-[#334155]">
+                      <input
+                        type="checkbox"
+                        checked={selectedStatuses.includes(st as LeadStatus)}
+                        onChange={() => toggleStatus(st as LeadStatus)}
+                        className="accent-[#2563eb] w-3.5 h-3.5"
+                      />
+                      <span>{st}</span>
+                    </label>
+                  )
+                )}
               </div>
             </div>
 
-            {/* Filter Group: Assigned Staff */}
             <div>
               <div className="text-[0.66rem] uppercase tracking-wider font-bold text-[#64748b] mb-2">
-                Assigned Staff
+                Assigned Sales Staff
               </div>
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                 {staff.map((s) => (
@@ -206,7 +423,6 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* Filter Group: Lead Source */}
             <div>
               <div className="text-[0.66rem] uppercase tracking-wider font-bold text-[#64748b] mb-2">
                 Lead Source
@@ -229,114 +445,145 @@ export const LeadsListPage: React.FC<LeadsListProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Search Bar & Hot Lead Toggle */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
-          <input
-            type="text"
-            placeholder="Search by name, mobile, or lead ID..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-white border border-[#e2e8f0] rounded-xl text-xs font-medium outline-none focus:border-[#2563eb] focus:ring-2 ring-blue-500/10 transition"
-          />
-        </div>
-        <label className="flex items-center gap-2 px-3.5 py-2 bg-white border border-[#e2e8f0] rounded-xl text-xs font-semibold cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={hotOnly}
-            onChange={(e) => setHotOnly(e.target.checked)}
-            className="accent-[#f59e0b] w-3.5 h-3.5"
-          />
-          <Flame className="w-3.5 h-3.5 text-[#f59e0b]" /> Hot leads only
-        </label>
-      </div>
-
-      {/* Leads Main Table */}
+      {/* Main Grid Table */}
       <div className="bg-white border border-[#e8edf3] rounded-2xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead className="bg-[#f8fafc] text-[#64748b] uppercase font-bold text-[0.66rem] border-b border-[#e8edf3]">
               <tr>
-                <th className="py-3 px-4">Lead</th>
+                <th className="py-3 px-3 w-8 text-center">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredLeads.length > 0 && selectedLeadIds.length === filteredLeads.length
+                    }
+                    onChange={handleSelectAll}
+                    className="accent-[#2563eb] cursor-pointer"
+                  />
+                </th>
+                <th className="py-3 px-4">Lead Customer</th>
                 <th className="py-3 px-3">Category</th>
                 <th className="py-3 px-3">Assigned Staff</th>
-                <th className="py-3 px-3">Status</th>
+                <th className="py-3 px-3">Status (Inline Edit)</th>
                 <th className="py-3 px-3">Source</th>
                 <th className="py-3 px-3">Next Follow-up</th>
-                <th className="py-3 px-4 text-right">Value</th>
+                <th className="py-3 px-4 text-right">Value (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f1f5f9]">
               {filteredLeads.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-[#94a3b8]">
+                  <td colSpan={8} className="py-12 text-center text-[#94a3b8]">
                     No leads match the selected scope and filters.
                   </td>
                 </tr>
               ) : (
-                filteredLeads.map((l) => (
-                  <tr
-                    key={l.id}
-                    onClick={() => onNavigate('lead-detail', l.id)}
-                    className="hover:bg-[#f8fafc] cursor-pointer transition"
-                  >
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-[#eef2ff] text-[#2563eb] font-bold flex items-center justify-center text-[0.78rem]">
-                          {l.customer_name.split(' ').map((n) => n[0]).join('')}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-[#0f172a] flex items-center gap-1.5">
-                            {l.customer_name}
-                            {l.hot_lead && <Flame className="w-3 h-3 text-[#f59e0b]" />}
+                filteredLeads.map((l) => {
+                  const isSelected = selectedLeadIds.includes(l.id);
+                  return (
+                    <tr
+                      key={l.id}
+                      onClick={() => onNavigate('lead-detail', l.id)}
+                      className={`hover:bg-[#f8fafc] cursor-pointer transition ${
+                        isSelected ? 'bg-[#eff6ff]' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-3 text-center" onClick={(e) => handleSelectRow(l.id, e)}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {}}
+                          className="accent-[#2563eb] cursor-pointer"
+                        />
+                      </td>
+
+                      <td className={`px-4 ${viewDensity === 'compact' ? 'py-2' : 'py-3'}`}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-[#eef2ff] text-[#2563eb] font-bold flex items-center justify-center text-[0.78rem] flex-shrink-0">
+                            {l.customer_name.split(' ').map((n) => n[0]).join('')}
                           </div>
-                          <div className="text-[0.68rem] text-[#94a3b8] font-medium">
-                            {l.lead_number} · {l.mobile_primary}
+                          <div>
+                            <div className="font-semibold text-[#0f172a] flex items-center gap-1.5">
+                              {l.customer_name}
+                              {l.hot_lead && <Flame className="w-3 h-3 text-[#f59e0b]" />}
+                            </div>
+                            <div className="text-[0.68rem] text-[#94a3b8] font-medium">
+                              {l.lead_number} · {l.mobile_primary}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-3">
-                      <span
-                        className={`inline-flex px-2 py-0.5 text-[0.66rem] font-bold rounded ${
-                          l.category_code === 'SG'
-                            ? 'bg-[#dbeafe] text-[#1e40af]'
-                            : l.category_code === 'KIT'
-                            ? 'bg-[#fef3c7] text-[#92400e]'
-                            : 'bg-[#dcfce7] text-[#166534]'
-                        }`}
+                      </td>
+
+                      <td className={`px-3 ${viewDensity === 'compact' ? 'py-2' : 'py-3'}`}>
+                        <span
+                          className={`inline-flex px-2 py-0.5 text-[0.66rem] font-bold rounded ${
+                            l.category_code === 'SG'
+                              ? 'bg-[#dbeafe] text-[#1e40af]'
+                              : l.category_code === 'KIT'
+                              ? 'bg-[#fef3c7] text-[#92400e]'
+                              : 'bg-[#dcfce7] text-[#166534]'
+                          }`}
+                        >
+                          {l.category_code}
+                        </span>
+                      </td>
+
+                      <td className={`px-3 ${viewDensity === 'compact' ? 'py-2' : 'py-3'} font-medium text-[#334155]`}>
+                        {l.assigned_staff}
+                      </td>
+
+                      {/* INLINE STATUS DROPDOWN (Direct Excel-style editing!) */}
+                      <td
+                        className={`px-3 ${viewDensity === 'compact' ? 'py-2' : 'py-3'}`}
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {l.category_code}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 font-medium text-[#334155]">{l.assigned_staff}</td>
-                    <td className="py-3.5 px-3">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[0.66rem] font-bold rounded-full uppercase ${
-                          l.status === 'WON'
-                            ? 'bg-[#dcfce7] text-[#166534]'
-                            : l.status === 'LOST'
-                            ? 'bg-[#fee2e2] text-[#991b1b]'
-                            : l.status === 'QUOTED'
-                            ? 'bg-[#cffafe] text-[#155e75]'
-                            : l.status === 'NEGOTIATION'
-                            ? 'bg-[#fef9c3] text-[#854d0e]'
-                            : 'bg-[#e0e7ff] text-[#3730a3]'
-                        }`}
-                      >
-                        {l.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 text-[#475569] font-medium">{l.source}</td>
-                    <td className="py-3.5 px-3 text-[#64748b]">
-                      {l.next_follow_up ? l.next_follow_up : '—'}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-[#0f172a]">
-                      {l.won_value ? `₹${l.won_value.toLocaleString('en-IN')}` : '—'}
-                    </td>
-                  </tr>
-                ))
+                        <select
+                          value={l.status}
+                          onChange={(e) =>
+                            updateLeadStatus(l.id, e.target.value as LeadStatus, `Inline status update`)
+                          }
+                          className={`px-2.5 py-1 text-[0.68rem] font-bold rounded-lg border outline-none cursor-pointer uppercase ${
+                            l.status === 'WON'
+                              ? 'bg-[#dcfce7] text-[#166534] border-[#86efac]'
+                              : l.status === 'LOST'
+                              ? 'bg-[#fee2e2] text-[#991b1b] border-[#fca5a5]'
+                              : l.status === 'QUOTED'
+                              ? 'bg-[#cffafe] text-[#155e75] border-[#a5f3fc]'
+                              : l.status === 'NEGOTIATION'
+                              ? 'bg-[#fef9c3] text-[#854d0e] border-[#fef08a]'
+                              : 'bg-[#e0e7ff] text-[#3730a3] border-[#c7d2fe]'
+                          }`}
+                        >
+                          {[
+                            'NEW',
+                            'CONTACTED',
+                            'QUALIFIED',
+                            'MEASUREMENT_DONE',
+                            'QUOTED',
+                            'NEGOTIATION',
+                            'ON_HOLD',
+                            'WON',
+                            'LOST',
+                          ].map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td className={`px-3 ${viewDensity === 'compact' ? 'py-2' : 'py-3'} text-[#475569] font-medium`}>
+                        {l.source}
+                      </td>
+                      <td className={`px-3 ${viewDensity === 'compact' ? 'py-2' : 'py-3'} text-[#64748b]`}>
+                        {l.next_follow_up || '—'}
+                      </td>
+                      <td className={`px-4 text-right font-bold text-[#0f172a] ${viewDensity === 'compact' ? 'py-2' : 'py-3'}`}>
+                        {l.won_value ? `₹${l.won_value.toLocaleString('en-IN')}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

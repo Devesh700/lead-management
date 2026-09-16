@@ -33,7 +33,7 @@ const AppContent: React.FC = () => {
         <Topbar activePage={activePage} />
 
         {/* Content View Body */}
-        <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-6 md:p-8 w-full mx-auto">
           {activePage === 'dashboard' && <DashboardPage onNavigate={handleNavigate} />}
           {activePage === 'reports' && <ReportsPage />}
           {activePage === 'leads' && <LeadsListPage onNavigate={handleNavigate} />}
