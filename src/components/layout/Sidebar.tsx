@@ -150,7 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage }) =
 
         <div className="flex items-center gap-2.5 p-2 rounded-xl bg-[#1e293b]">
           <div className="w-8 h-8 rounded-lg bg-[#2563eb] text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
-            {currentStaff.full_name.split(' ').map((n) => n[0]).join('')}
+            {currentStaff.full_name.split(' ').map((n: string) => n[0]).join('')}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-white truncate">{currentStaff.full_name}</div>

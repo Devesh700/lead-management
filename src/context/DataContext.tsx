@@ -17,8 +17,11 @@ interface DataContextType {
   leads: Lead[];
   quotations: Quotation[];
   activeCategory: CategoryCode | 'ALL';
+  activeCategories: (CategoryCode | 'ALL')[];
   currentStaff: Staff;
   setActiveCategory: (cat: CategoryCode | 'ALL') => void;
+  setActiveCategories: (cats: (CategoryCode | 'ALL')[]) => void;
+  toggleCategoryScope: (cat: CategoryCode | 'ALL') => void;
   setCurrentStaff: (staffId: string) => void;
   addLead: (lead: Omit<Lead, 'id' | 'lead_number' | 'created_at'>) => Lead;
   updateLead: (id: string, updates: Partial<Lead>) => void;
@@ -70,7 +73,41 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : (initialData.quotations as Quotation[]);
   });
 
-  const [activeCategory, setActiveCategory] = useState<CategoryCode | 'ALL'>('SG');
+  const [activeCategories, setActiveCategories] = useState<(CategoryCode | 'ALL')[]>(['ALL']);
+
+  // Derived single activeCategory getter for backward compatibility
+  const activeCategory: CategoryCode | 'ALL' =
+    activeCategories.includes('ALL') || activeCategories.length === 0
+      ? 'ALL'
+      : activeCategories.length === 1
+      ? activeCategories[0]
+      : 'ALL';
+
+  const setActiveCategory = (cat: CategoryCode | 'ALL') => {
+    setActiveCategories([cat]);
+  };
+
+  const toggleCategoryScope = (cat: CategoryCode | 'ALL') => {
+    if (cat === 'ALL') {
+      setActiveCategories(['ALL']);
+      return;
+    }
+
+    setActiveCategories((prev) => {
+      let current = prev.includes('ALL') ? [] : [...prev];
+      if (current.includes(cat)) {
+        current = current.filter((c) => c !== cat);
+      } else {
+        current.push(cat);
+      }
+
+      const availableCodes = categories.map((c) => c.code);
+      if (current.length === 0 || current.length === availableCodes.length) {
+        return ['ALL'];
+      }
+      return current;
+    });
+  };
 
   const [currentStaff, setCurrentStaffState] = useState<Staff>(() => staff[1] || staff[0]);
 
@@ -97,7 +134,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentStaffState(found);
       // Auto switch category if staff is restricted to single category
       if (found.role !== 'SUPER_ADMIN' && found.categories.length === 1) {
-        setActiveCategory(found.categories[0]);
+        setActiveCategories([found.categories[0]]);
+      } else {
+        setActiveCategories(['ALL']);
       }
     }
   };
@@ -116,9 +155,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Role & Category scoped filters
   const getFilteredLeads = (): Lead[] => {
     return leads.filter((lead) => {
-      // 1. Category Scope Filter
-      if (activeCategory !== 'ALL' && lead.category_code !== activeCategory) {
-        return false;
+      // 1. Multi-Category Scope Filter
+      if (!activeCategories.includes('ALL') && activeCategories.length > 0) {
+        if (!activeCategories.includes(lead.category_code)) {
+          return false;
+        }
       }
       // 2. Role Scoping
       if (currentStaff.role === 'SUPER_ADMIN') {
@@ -140,8 +181,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getFilteredQuotations = (): Quotation[] => {
     const accessibleLeads = getFilteredLeads().map((l) => l.id);
     return quotations.filter((q) => {
-      if (activeCategory !== 'ALL' && q.category_code !== activeCategory) {
-        return false;
+      if (!activeCategories.includes('ALL') && activeCategories.length > 0) {
+        if (!activeCategories.includes(q.category_code)) {
+          return false;
+        }
       }
       if (currentStaff.role === 'SUPER_ADMIN') {
         return true;
@@ -300,8 +343,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         leads,
         quotations,
         activeCategory,
+        activeCategories,
         currentStaff,
         setActiveCategory,
+        setActiveCategories,
+        toggleCategoryScope,
         setCurrentStaff,
         addLead,
         updateLead,
