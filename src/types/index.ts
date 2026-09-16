@@ -20,7 +20,8 @@ export type LeadSource =
   | 'REFERRAL'
   | 'STORE_VISIT'
   | 'EVENT'
-  | 'OTHER';
+  | 'OTHER'
+  | string;
 
 export type QuotationStatus =
   | 'DRAFT'
